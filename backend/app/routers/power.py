@@ -30,6 +30,24 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/reports/monthly")
+def monthly_report(
+    month: str | None = Query(default=None, description="报表月份，格式 YYYY-MM，缺省取当月"),
+) -> dict[str, Any]:
+    """供电系统月度试验报表：读数与列表、详情同源，无法回填的存量记录逐条标注。"""
+    report, error = service.monthly_report(month=month)
+    if report is None:
+        raise HTTPException(status_code=400, detail=error)
+    return report
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出供电系统清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "power", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条供电设备明细；不存在时给出可读的错误说明。"""
@@ -50,16 +68,11 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条供电设备执行负荷预警、绝缘报警、安排修复；不允许的动作会被拦下并说明原因。"""
+    """对单条供电设备执行负荷预警、绝缘报警、安排修复；不允许的动作会被拦下并说明原因。
+
+    安排修复必须随动作录入本次运行负荷、绝缘电阻，落库后回执返回的就是
+    列表与详情读到的同一份数据；设备已修复时重复提交不再生效。
+    """
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
-    if entry is None:
-        return ActionResult(ok=False, message=message)
-    return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出供电系统清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "power", "total": total, "items": items}
+    entry, message, applied = service.run_action(entry_id, action, payload.values)
+    return ActionResult(ok=applied, message=message, entry=entry)
