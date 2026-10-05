@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import ROUTERS
+from app.services.power import MODULE as POWER_MODULE
+from app.services.power import PowerService
 from app.store import store
 
 app = FastAPI(title="矿山安全监测管理平台", version="1.0.0")
@@ -34,5 +36,11 @@ def health() -> dict[str, object]:
 
 @app.get("/api/overview")
 def overview() -> dict[str, object]:
-    """运营概览：把各业务模块的待处理量汇总成看板卡片。"""
-    return store.overview()
+    """运营概览：把各业务模块的待处理量汇总成看板卡片。
+
+    供电设备读数与列表、详情同源，概览看到的永远是最新一版落库读数。
+    """
+    data = store.overview()
+    data["power_readings"] = PowerService().latest_readings()
+    data["power_module"] = POWER_MODULE
+    return data

@@ -4,7 +4,9 @@
 """
 from __future__ import annotations
 
-from typing import Any
+import threading
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from app.seed import SEED_ROWS
 
@@ -14,12 +16,26 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        # 动作落库需要串行化：并发点两次修复只能有一次真正写入。
+        self._locks: dict[str, threading.Lock] = {
+            name: threading.Lock() for name in self._tables
+        }
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])
+
+    @contextmanager
+    def lock(self, module: str) -> Iterator[None]:
+        """拿模块级写锁；同一模块的动作在锁内完成校验与落库，不会互相覆盖。"""
+        module_lock = self._locks.setdefault(module, threading.Lock())
+        module_lock.acquire()
+        try:
+            yield
+        finally:
+            module_lock.release()
 
     def find(self, module: str, entry_id: int) -> dict[str, Any] | None:
         for row in self.rows(module):
